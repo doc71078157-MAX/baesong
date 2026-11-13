@@ -47,6 +47,16 @@ a.go{display:inline-flex;align-items:center;text-decoration:none;background:var(
 .pin.done{background:var(--done)}
 .pin.me{background:#1a56db;color:#fff}
 .pin.home{background:#b45309;color:#fff}
+.pinwrap{position:relative;width:30px;height:30px}
+.pinlab{position:absolute;left:34px;top:4px;white-space:nowrap;font:700 12px sans-serif;background:var(--card);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:2px 6px;box-shadow:0 1px 3px rgba(0,0,0,.3)}
+.pinlab.done{color:var(--done);text-decoration:line-through}
+.rt{display:flex;gap:10px;align-items:flex-start;padding:7px 0;border-top:1px solid var(--line)}
+.rt:first-child{border-top:0}
+.rn{flex:0 0 30px;height:30px;border-radius:50%;background:var(--main);color:var(--main-ink);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px}
+.rn.home{background:#b45309;color:#fff}
+.rt.done .rn{background:var(--done)}
+.rt.done .ra{text-decoration:line-through;color:var(--done)}
+.ra{font-weight:600;word-break:keep-all;padding-top:3px}
 details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;align-items:center}
 </style>
 </head>
@@ -78,6 +88,11 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
       <button id="clear">전부 지우기</button>
     </div>
     <p id="status" role="status"></p>
+  </section>
+
+  <section id="routeBox" hidden>
+    <h2 style="font-size:17px;margin:0 0 6px">배송 순서 (지도 번호와 같아요)</h2>
+    <ol id="route"></ol>
   </section>
 
   <div id="map">지도는 위에서 키를 저장하고<br>[지도에 띄우기]를 누르면 나타나요.</div>
@@ -222,8 +237,11 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
     var bounds = new kakao.maps.LatLngBounds();
     stops.forEach(function(s, i){
       var pos = new kakao.maps.LatLng(s.lat, s.lng);
+      var wrap = document.createElement("div"); wrap.className = "pinwrap";
       var div = document.createElement("div"); div.className = "pin" + (s.done?" done":""); div.textContent = i+1;
-      var o = new kakao.maps.CustomOverlay({position:pos, content:div, yAnchor:0.5}); o.setMap(map); overlays.push(o);
+      var lab = document.createElement("div"); lab.className = "pinlab" + (s.done?" done":""); lab.textContent = shortAddr(s.addr);
+      wrap.appendChild(div); wrap.appendChild(lab);
+      var o = new kakao.maps.CustomOverlay({position:pos, content:wrap, yAnchor:0.5}); o.setMap(map); overlays.push(o);
       bounds.extend(pos);
     });
     var pts = [];
@@ -232,8 +250,11 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
     if(homePt) pts.push(new kakao.maps.LatLng(homePt.lat, homePt.lng));
     if(homePt){
       var hp = new kakao.maps.LatLng(homePt.lat, homePt.lng);
+      var hw = document.createElement("div"); hw.className = "pinwrap";
       var hd = document.createElement("div"); hd.className = "pin home"; hd.textContent = "집";
-      var ho = new kakao.maps.CustomOverlay({position:hp, content:hd, yAnchor:0.5});
+      var hlab = document.createElement("div"); hlab.className = "pinlab"; hlab.textContent = "집 " + shortAddr(homePt.addr);
+      hw.appendChild(hd); hw.appendChild(hlab);
+      var ho = new kakao.maps.CustomOverlay({position:hp, content:hw, yAnchor:0.5});
       ho.setMap(map); overlays.push(ho); bounds.extend(hp);
     }
     if(pts.length > 1){
@@ -248,7 +269,33 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
     map.setBounds(bounds);
   }
 
+  function shortAddr(a){
+    var t = String(a).split(/\s+/).filter(Boolean);
+    while(t.length > 2 && /(도|특별시|광역시|특별자치시|특별자치도)$/.test(t[0])) t.shift();
+    return t.join(" ");
+  }
+
+  function renderRoute(){
+    var box = $("routeBox"), ol = $("route"); ol.innerHTML = "";
+    if(!stops.length){ box.hidden = true; return; }
+    box.hidden = false;
+    stops.forEach(function(s, i){
+      if(hideDone && s.done) return;
+      var li = document.createElement("li"); li.className = "rt" + (s.done ? " done" : "");
+      var n = document.createElement("span"); n.className = "rn"; n.textContent = i + 1;
+      var a = document.createElement("span"); a.className = "ra"; a.textContent = shortAddr(s.addr);
+      li.appendChild(n); li.appendChild(a); ol.appendChild(li);
+    });
+    if(homePt){
+      var hl = document.createElement("li"); hl.className = "rt";
+      var hn = document.createElement("span"); hn.className = "rn home"; hn.textContent = "집";
+      var ha = document.createElement("span"); ha.className = "ra"; ha.textContent = "돌아올 곳: " + shortAddr(homePt.addr);
+      hl.appendChild(hn); hl.appendChild(ha); ol.appendChild(hl);
+    }
+  }
+
   function render(){
+    renderRoute();
     var ol = $("list"); ol.innerHTML = "";
     var prev = me;
     stops.forEach(function(s, i){
