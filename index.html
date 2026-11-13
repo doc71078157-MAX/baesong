@@ -46,6 +46,7 @@ a.go{display:inline-flex;align-items:center;text-decoration:none;background:var(
 .pin{width:30px;height:30px;border-radius:50%;background:var(--main);color:var(--main-ink);border:2px solid #fff;display:flex;align-items:center;justify-content:center;font:800 14px sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.4)}
 .pin.done{background:var(--done)}
 .pin.me{background:#1a56db;color:#fff}
+.pin.home{background:#b45309;color:#fff}
 details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;align-items:center}
 </style>
 </head>
@@ -60,6 +61,13 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
       <input type="text" id="key" placeholder="JavaScript 키 붙여넣기" autocomplete="off">
       <div class="row"><button class="main" id="saveKey">키 저장</button></div>
     </details>
+  </section>
+
+  <section>
+    <label for="home"><b>돌아올 곳</b> (동선이 항상 여기서 끝나요)</label>
+    <input type="text" id="home" autocomplete="off">
+    <div class="row"><button id="saveHome">돌아올 곳 저장</button></div>
+    <p class="hint">비워 두면 마지막 배송지에서 끝나요.</p>
   </section>
 
   <section>
@@ -91,7 +99,7 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
   var stops = [];      // {addr, lat, lng, done}
   var fails = [];      // addresses that were not found
   var me = null;       // {lat,lng}
-  var map = null, overlays = [], hideDone = false, kakaoReady = false;
+  var map = null, overlays = [], hideDone = false, kakaoReady = false, homePt = null;
 
   function load(k, d){ try{ var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch(e){ return d; } }
   function save(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
@@ -101,6 +109,10 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
   fails = load("fails", []);
   var appKey = load("kakaoKey", "");
   $("key").value = appKey;
+  var homeAddr = load("home", "경기도 평택시 안현로서6길 95");
+  homePt = load("homePt", null);
+  if(homePt && homePt.addr !== homeAddr) homePt = null;
+  $("home").value = homeAddr;
   if(!appKey) $("keyBox").open = true;
 
   function persist(){ save("stops", stops); save("fails", fails); }
@@ -162,20 +174,21 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
     return out;
   }
 
-  function pathLen(arr, start){
+  function pathLen(arr, start, end){
     var d = 0, prev = start;
     for(var i = 0; i < arr.length; i++){ if(prev) d += dist(prev, arr[i]); prev = arr[i]; }
+    if(end && prev) d += dist(prev, end);
     return d;
   }
   // 2-opt: 순서 일부를 뒤집어 보고 더 짧아지면 바꿔요 (가까운 곳부터 가는 방식보다 낫게 다듬어요)
-  function twoOpt(arr, start){
-    var best = pathLen(arr, start), n = arr.length, improved = true, guard = 0;
+  function twoOpt(arr, start, end){
+    var best = pathLen(arr, start, end), n = arr.length, improved = true, guard = 0;
     while(improved && guard++ < 50){
       improved = false;
       for(var i = 0; i < n - 1; i++){
         for(var j = i + 1; j < n; j++){
           var cand = arr.slice(0, i).concat(arr.slice(i, j + 1).reverse(), arr.slice(j + 1));
-          var l = pathLen(cand, start);
+          var l = pathLen(cand, start, end);
           if(l < best - 1e-9){ arr = cand; best = l; improved = true; }
         }
       }
@@ -186,9 +199,18 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
   function sortStops(){
     var done = stops.filter(function(s){return s.done});
     var todo = stops.filter(function(s){return !s.done});
-    todo = twoOpt(nearestOrder(todo, me), me);
+    var nn = nearestOrder(todo, me);
+    var cA = twoOpt(nn, me, homePt);
+    var cB = twoOpt(twoOpt(nn, me, null), me, homePt);
+    todo = pathLen(cB, me, homePt) < pathLen(cA, me, homePt) ? cB : cA;
     stops = done.concat(todo);
-    $("sortInfo").textContent = me ? "내 현재 위치에서 출발하는 짧은 순서로 정렬했어요. (직선거리 기준, 지도의 선이 가는 순서예요)" : "내 위치를 못 받아서 첫 번째 주소를 기준으로 정렬했어요.";
+    $("sortInfo").textContent = me ? "내 현재 위치에서 출발해 " + (homePt ? "마지막에 집으로 돌아오는 " : "") + "짧은 순서로 정렬했어요. (직선거리 기준, 지도의 선이 가는 순서예요)" : "내 위치를 못 받아서 첫 번째 주소를 기준으로 정렬했어요.";
+  }
+
+  function ensureHome(){
+    if(!homeAddr){ homePt = null; save("homePt", null); return Promise.resolve(); }
+    if(homePt && homePt.addr === homeAddr) return Promise.resolve();
+    return geocode(homeAddr).then(function(r){ homePt = r; save("homePt", r); });
   }
 
   function drawMap(){
@@ -207,6 +229,13 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
     var pts = [];
     if(me) pts.push(new kakao.maps.LatLng(me.lat, me.lng));
     stops.forEach(function(s){ if(!s.done) pts.push(new kakao.maps.LatLng(s.lat, s.lng)); });
+    if(homePt) pts.push(new kakao.maps.LatLng(homePt.lat, homePt.lng));
+    if(homePt){
+      var hp = new kakao.maps.LatLng(homePt.lat, homePt.lng);
+      var hd = document.createElement("div"); hd.className = "pin home"; hd.textContent = "집";
+      var ho = new kakao.maps.CustomOverlay({position:hp, content:hd, yAnchor:0.5});
+      ho.setMap(map); overlays.push(ho); bounds.extend(hp);
+    }
     if(pts.length > 1){
       var pl = new kakao.maps.Polyline({path:pts, strokeWeight:4, strokeColor:"#0e6b5c", strokeOpacity:0.8});
       pl.setMap(map); overlays.push(pl);
@@ -247,6 +276,18 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
       li.appendChild(n); li.appendChild(body); ol.appendChild(li);
       if(!s.done) prev = s;
     });
+    if(homePt && stops.length){
+      var hl = document.createElement("li"); hl.className = "stop";
+      var hn = document.createElement("div"); hn.className = "num"; hn.textContent = "집"; hn.style.background = "#b45309";
+      var hb = document.createElement("div");
+      var ha = document.createElement("div"); ha.className = "addr"; ha.textContent = "돌아올 곳: " + homePt.addr;
+      var hacts = document.createElement("div"); hacts.className = "acts";
+      var hgo = document.createElement("a"); hgo.className = "go"; hgo.textContent = "길안내";
+      hgo.href = "https://map.kakao.com/link/to/" + encodeURIComponent(homePt.addr) + "," + homePt.lat + "," + homePt.lng;
+      hgo.target = "_blank"; hgo.rel = "noopener";
+      hacts.appendChild(hgo); hb.appendChild(ha); hb.appendChild(hacts);
+      hl.appendChild(hn); hl.appendChild(hb); ol.appendChild(hl);
+    }
     if(!stops.length) ol.innerHTML = '<li class="hint">아직 주소가 없어요. 위에 주소를 붙여넣고 [지도에 띄우기]를 누르세요.</li>';
 
     var f = $("fails"); f.innerHTML = "";
@@ -278,6 +319,21 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
     }).catch(function(e){ setStatus(e.message, true); });
   }
 
+  $("saveHome").onclick = function(){
+    homeAddr = $("home").value.trim(); save("home", homeAddr); homePt = null; save("homePt", null);
+    if(!homeAddr){
+      setStatus("돌아올 곳을 비웠어요. 이제 마지막 배송지에서 끝나요.");
+      if(stops.length){ sortStops(); persist(); render(); drawMap(); }
+      return;
+    }
+    setStatus("돌아올 곳을 찾는 중...");
+    loadKakao().then(ensureHome).then(function(){
+      if(!homePt){ setStatus("돌아올 곳 주소를 못 찾았어요. 도로명 주소를 정확히 적어 주세요.", true); return; }
+      if(stops.length){ sortStops(); persist(); }
+      render(); drawMap(); setStatus("돌아올 곳을 저장했어요.");
+    }).catch(function(e){ setStatus(e.message, true); });
+  };
+
   $("saveKey").onclick = function(){
     appKey = $("key").value.trim(); save("kakaoKey", appKey);
     setStatus(appKey ? "키를 저장했어요." : "키가 비어 있어요.", !appKey);
@@ -289,7 +345,7 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
     setStatus("지도를 불러오는 중...");
     loadKakao().then(function(){
       setStatus("내 위치와 주소를 찾는 중... (" + lines.length + "개)");
-      return Promise.all([getMe(), Promise.all(lines.map(geocode))]);
+      return Promise.all([getMe(), Promise.all(lines.map(geocode)), ensureHome()]);
     }).then(function(res){
       var found = res[1].filter(Boolean);
       var bad = []; res[1].forEach(function(r, i){ if(!r) bad.push(lines[i]); });
@@ -303,7 +359,7 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
 
   $("resort").onclick = function(){
     setStatus("내 위치를 확인하는 중...");
-    getMe().then(function(){
+    Promise.all([getMe(), loadKakao().then(ensureHome).catch(function(){})]).then(function(){
       sortStops(); persist(); render(); drawMap();
       setStatus(me ? "내 위치 기준으로 다시 정렬했어요." : "위치를 못 받았어요. 핸드폰 위치 권한을 켜 주세요.", !me);
     });
@@ -320,7 +376,7 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
 
   render();
   if(stops.length && appKey){
-    loadKakao().then(function(){ return getMe(); }).then(function(){ drawMap(); render(); }).catch(function(){});
+    loadKakao().then(ensureHome).then(function(){ return getMe(); }).then(function(){ drawMap(); render(); }).catch(function(){});
   }
 })();
 </script>
