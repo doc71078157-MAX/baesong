@@ -65,7 +65,7 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
   <h1>배송 동선</h1>
 
   <section>
-    <details id="keyBox">
+    <details id="keyBox" style="display:none">
       <summary>처음 한 번: 카카오 지도 키 넣기</summary>
       <p class="hint">카카오 개발자 사이트에서 받은 <b>JavaScript 키</b>를 아래에 붙여넣고 저장하세요. 이 핸드폰에만 저장돼요.</p>
       <input type="text" id="key" placeholder="JavaScript 키 붙여넣기" autocomplete="off">
@@ -152,13 +152,20 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
     });
   }
 
+  var geoErr = "";
   function getMe(){
     return new Promise(function(resolve){
-      if(!navigator.geolocation) return resolve(null);
+      geoErr = "";
+      if(!navigator.geolocation){ geoErr = "nosupport"; return resolve(null); }
       navigator.geolocation.getCurrentPosition(function(p){
         me = {lat:p.coords.latitude, lng:p.coords.longitude}; resolve(me);
-      }, function(){ resolve(null); }, {enableHighAccuracy:true, timeout:8000, maximumAge:30000});
+      }, function(e){ geoErr = (e && e.code === 1) ? "denied" : "fail"; resolve(null); }, {enableHighAccuracy:false, timeout:10000, maximumAge:60000});
     });
+  }
+  function geoMsg(){
+    if(geoErr === "denied") return "위치 권한이 꺼져 있어요. 주소창 왼쪽 자물쇠(또는 설정 아이콘)를 눌러 [위치]를 허용으로 바꾸고 다시 눌러 주세요.";
+    if(geoErr === "nosupport") return "이 브라우저는 위치를 지원하지 않아요.";
+    return "위치를 못 받았어요. 폰의 위치(GPS)를 켜고 다시 눌러 주세요.";
   }
 
   function geocode(addr){
@@ -418,10 +425,15 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
   };
 
   $("resort").onclick = function(){
+    var info = $("sortInfo");
+    if(!stops.length){ info.textContent = "먼저 주소를 지도에 띄워 주세요. 목록이 비어 있어요."; setStatus("먼저 주소를 지도에 띄워 주세요.", true); return; }
+    info.textContent = "내 위치를 확인하는 중이에요. 폰에서 위치 허용을 물으면 [허용]을 눌러 주세요 (최대 10초)...";
     setStatus("내 위치를 확인하는 중...");
     Promise.all([getMe(), loadKakao().then(ensureHome).catch(function(){})]).then(function(){
-      sortStops(); persist(); render(); drawMap();
-      setStatus(me ? "내 위치 기준으로 다시 정렬했어요." : "위치를 못 받았어요. 핸드폰 위치 권한을 켜 주세요.", !me);
+      try{ sortStops(); persist(); render(); drawMap(); }catch(e){ info.textContent = "정렬 중 오류: " + e.message; setStatus("정렬 중 오류가 났어요.", true); return; }
+      if(me){ setStatus("내 위치 기준으로 다시 정렬했어요."); }
+      else { info.textContent = geoMsg() + " (지금은 첫 번째 주소 기준으로 정렬했어요.)"; setStatus(geoMsg(), true); }
+      try{ info.scrollIntoView({block:"center"}); }catch(e){}
     });
   };
 
@@ -461,3 +473,4 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
 </script>
 </body>
 </html>
+
