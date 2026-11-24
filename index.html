@@ -81,6 +81,8 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
   </section>
 
   <section>
+    <button class="main" id="micBtn" style="width:100%;margin-bottom:6px">🎤 음성으로 말하기 (눌러서 시작)</button>
+    <p class="hint" id="micStatus" role="status">주소 하나를 말하고 잠깐 쉬면 아래 칸에 한 줄로 들어가요. 다시 누르면 멈춰요.</p>
     <label for="addrs"><b>배송 주소</b> (한 줄에 주소 하나)</label>
     <textarea id="addrs" placeholder="예)&#10;경기도 평택시 안중읍 안현로 1&#10;경기도 평택시 안중읍 중앙로 20"></textarea>
     <div class="row">
@@ -446,6 +448,32 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
     stops = []; fails = []; persist(); render(); drawMap(); setStatus("지웠어요.");
   };
 
+  (function voice(){
+    var btn = $("micBtn"), st = $("micStatus");
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var rec = null, want = false;
+    function setBtn(on){ btn.textContent = on ? "⏹ 듣는 중… 눌러서 멈춤" : "🎤 음성으로 말하기 (눌러서 시작)"; }
+    function addLine(t){
+      t = (t || "").trim(); if(!t) return;
+      var box = $("addrs"); box.value = (box.value.trim() ? box.value.replace(/\s+$/, "") + "\n" : "") + t;
+      st.textContent = "들은 주소: " + t + "  (계속 말하거나, 끝나면 버튼을 눌러 멈추세요)";
+    }
+    btn.onclick = function(){
+      if(!SR){ st.textContent = "이 브라우저는 음성 입력을 지원하지 않아요. 크롬으로 열어 주세요."; return; }
+      if(want){ want = false; try{ rec.stop(); }catch(e){} setBtn(false); st.textContent = "멈췄어요. 아래 칸을 확인하고 [지도에 띄우기]를 누르세요."; return; }
+      rec = new SR(); rec.lang = "ko-KR"; rec.continuous = true; rec.interimResults = false;
+      rec.onresult = function(ev){ for(var i = ev.resultIndex; i < ev.results.length; i++){ if(ev.results[i].isFinal) addLine(ev.results[i][0].transcript); } };
+      rec.onerror = function(ev){
+        if(ev.error === "not-allowed" || ev.error === "service-not-allowed"){ want = false; setBtn(false); st.textContent = "마이크를 허용하지 않으셨어요. 주소창 왼쪽 자물쇠를 눌러 [마이크]를 허용으로 바꾸고 다시 눌러 주세요."; }
+        else if(ev.error === "no-speech"){ st.textContent = "말소리가 안 들려요. 계속 듣고 있어요…"; }
+        else if(ev.error !== "aborted"){ st.textContent = "음성 입력 오류(" + ev.error + "). 다시 눌러 주세요."; }
+      };
+      rec.onend = function(){ if(want){ try{ rec.start(); }catch(e){ want = false; setBtn(false); } } else setBtn(false); };
+      try{ want = true; rec.start(); setBtn(true); st.textContent = "듣는 중… 주소 하나를 말하고 잠깐 쉬세요."; }
+      catch(e){ want = false; setBtn(false); st.textContent = "음성 입력을 시작하지 못했어요. 다시 눌러 주세요."; }
+    };
+  })();
+
   (function importHash(){
     var h = location.hash || "";
     if(h.indexOf("#a=") !== 0) return;
@@ -473,4 +501,3 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
 </script>
 </body>
 </html>
-
