@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>배송 동선</title>
+<style>
+:root{
+  --bg:#f2f4f0; --card:#ffffff; --ink:#18222d; --sub:#5b6773; --line:#d5dad3;
+  --main:#0e6b5c; --main-ink:#ffffff; --warn:#b3261e; --done:#9aa3a0; --soft:#e3efeb;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --bg:#10161b; --card:#19222a; --ink:#eef2f1; --sub:#9fb0ac; --line:#2c3a42;
+    --main:#3fb9a1; --main-ink:#06201b; --warn:#ff8a80; --done:#6c7a76; --soft:#1d3a34; }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:-apple-system,"Apple SD Gothic Neo","Noto Sans KR","Malgun Gothic",sans-serif;font-size:17px;line-height:1.5;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+.wrap{max-width:720px;margin:0 auto;padding:14px}
+h1{font-size:22px;margin:4px 0 12px}
+section{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:12px}
+textarea,input[type=text]{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px}
+textarea{min-height:130px;resize:vertical}
+button{font:inherit;border:0;border-radius:10px;padding:12px 14px;min-height:48px;background:var(--soft);color:var(--ink);font-weight:600;cursor:pointer}
+button.main{background:var(--main);color:var(--main-ink)}
+button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,summary:focus-visible{outline:3px solid var(--main);outline-offset:2px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.row>button{flex:1 1 140px}
+.hint{color:var(--sub);font-size:14px;margin:6px 0 0}
+#map{width:100%;height:300px;border-radius:12px;border:1px solid var(--line);background:var(--soft);display:flex;align-items:center;justify-content:center;color:var(--sub);text-align:center;padding:10px}
+#status{margin:10px 0 0;font-weight:600}
+.err{color:var(--warn)}
+ol{list-style:none;margin:0;padding:0}
+.stop{display:grid;grid-template-columns:40px 1fr;gap:10px;padding:12px 0;border-top:1px solid var(--line)}
+.stop:first-child{border-top:0}
+.num{width:40px;height:40px;border-radius:50%;background:var(--main);color:var(--main-ink);display:flex;align-items:center;justify-content:center;font-weight:800}
+.stop.done .num{background:var(--done)}
+.stop.done .addr{text-decoration:line-through;color:var(--done)}
+.addr{font-weight:600;word-break:keep-all}
+.dist{color:var(--sub);font-size:14px}
+.acts{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
+.acts button,.acts a{min-height:44px;padding:8px 12px;font-size:15px}
+a.go{display:inline-flex;align-items:center;text-decoration:none;background:var(--main);color:var(--main-ink);border-radius:10px;font-weight:700}
+.fail{border-top:1px solid var(--line);padding:10px 0}
+.fail .row{margin-top:6px}
+.pin{width:30px;height:30px;border-radius:50%;background:var(--main);color:var(--main-ink);border:2px solid #fff;display:flex;align-items:center;justify-content:center;font:800 14px sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.pin.done{background:var(--done)}
+.pin.me{background:#1a56db;color:#fff}
+details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;align-items:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>배송 동선</h1>
+
+  <section>
+    <details id="keyBox">
+      <summary>처음 한 번: 카카오 지도 키 넣기</summary>
+      <p class="hint">카카오 개발자 사이트에서 받은 <b>JavaScript 키</b>를 아래에 붙여넣고 저장하세요. 이 핸드폰에만 저장돼요.</p>
+      <input type="text" id="key" placeholder="JavaScript 키 붙여넣기" autocomplete="off">
+      <div class="row"><button class="main" id="saveKey">키 저장</button></div>
+    </details>
+  </section>
+
+  <section>
+    <label for="addrs"><b>배송 주소</b> (한 줄에 주소 하나)</label>
+    <textarea id="addrs" placeholder="예)&#10;경기도 평택시 안중읍 안현로 1&#10;경기도 평택시 안중읍 중앙로 20"></textarea>
+    <div class="row">
+      <button class="main" id="run">지도에 띄우기</button>
+      <button id="clear">전부 지우기</button>
+    </div>
+    <p id="status" role="status"></p>
+  </section>
+
+  <div id="map">지도는 위에서 키를 저장하고<br>[지도에 띄우기]를 누르면 나타나요.</div>
+
+  <section style="margin-top:12px">
+    <div class="row" style="margin-top:0">
+      <button id="resort">내 위치에서 가까운 순서로 정렬</button>
+      <button id="hideDone">완료 숨기기: 꺼짐</button>
+    </div>
+    <p class="hint" id="sortInfo"></p>
+    <ol id="list"></ol>
+    <div id="fails"></div>
+  </section>
+</div>
+
+<script>
+(function(){
+  var $ = function(id){return document.getElementById(id)};
+  var stops = [];      // {addr, lat, lng, done}
+  var fails = [];      // addresses that were not found
+  var me = null;       // {lat,lng}
+  var map = null, overlays = [], hideDone = false, kakaoReady = false;
+
+  function load(k, d){ try{ var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; }catch(e){ return d; } }
+  function save(k, v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+  function setStatus(msg, bad){ var s=$("status"); s.textContent=msg; s.className = bad ? "err" : ""; }
+
+  stops = load("stops", []);
+  fails = load("fails", []);
+  var appKey = load("kakaoKey", "");
+  $("key").value = appKey;
+  if(!appKey) $("keyBox").open = true;
+
+  function persist(){ save("stops", stops); save("fails", fails); }
+
+  function dist(a, b){
+    var R=6371, rad=Math.PI/180;
+    var dLat=(b.lat-a.lat)*rad, dLng=(b.lng-a.lng)*rad;
+    var x=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(a.lat*rad)*Math.cos(b.lat*rad)*Math.sin(dLng/2)*Math.sin(dLng/2);
+    return 2*R*Math.asin(Math.sqrt(x));
+  }
+  function fmt(km){ return km < 1 ? Math.round(km*1000)+"m" : km.toFixed(1)+"km"; }
+
+  function loadKakao(){
+    return new Promise(function(resolve, reject){
+      if(kakaoReady) return resolve();
+      if(!appKey) return reject(new Error("키가 없어요. 위에서 카카오 JavaScript 키를 저장하세요."));
+      var s = document.createElement("script");
+      s.src = "https://dapi.kakao.com/v2/maps/sdk.js?appkey=" + encodeURIComponent(appKey) + "&libraries=services&autoload=false";
+      s.onload = function(){ kakao.maps.load(function(){ kakaoReady = true; resolve(); }); };
+      s.onerror = function(){ reject(new Error("카카오 지도를 불러오지 못했어요. 키가 맞는지, 사이트 주소를 카카오에 등록했는지 확인하세요.")); };
+      document.head.appendChild(s);
+    });
+  }
+
+  function getMe(){
+    return new Promise(function(resolve){
+      if(!navigator.geolocation) return resolve(null);
+      navigator.geolocation.getCurrentPosition(function(p){
+        me = {lat:p.coords.latitude, lng:p.coords.longitude}; resolve(me);
+      }, function(){ resolve(null); }, {enableHighAccuracy:true, timeout:8000, maximumAge:30000});
+    });
+  }
+
+  function geocode(addr){
+    return new Promise(function(resolve){
+      var g = new kakao.maps.services.Geocoder();
+      g.addressSearch(addr, function(r, st){
+        if(st === kakao.maps.services.Status.OK && r.length){
+          return resolve({addr:addr, lat:parseFloat(r[0].y), lng:parseFloat(r[0].x), done:false});
+        }
+        var p = new kakao.maps.services.Places();
+        p.keywordSearch(addr, function(r2, st2){
+          if(st2 === kakao.maps.services.Status.OK && r2.length){
+            resolve({addr:addr, lat:parseFloat(r2[0].y), lng:parseFloat(r2[0].x), done:false});
+          } else resolve(null);
+        });
+      });
+    });
+  }
+
+  function nearestOrder(list, start){
+    var left = list.slice(), out = [], cur = start;
+    if(!cur && left.length){ cur = left.shift(); out.push(cur); }
+    while(left.length){
+      var bi = 0, bd = Infinity;
+      for(var i=0;i<left.length;i++){ var d = dist(cur, left[i]); if(d<bd){bd=d;bi=i;} }
+      cur = left.splice(bi,1)[0]; out.push(cur);
+    }
+    return out;
+  }
+
+  function sortStops(){
+    var done = stops.filter(function(s){return s.done});
+    var todo = stops.filter(function(s){return !s.done});
+    todo = nearestOrder(todo, me);
+    stops = done.concat(todo);
+    $("sortInfo").textContent = me ? "내 현재 위치에서 가까운 순서로 정렬했어요." : "내 위치를 못 받아서 첫 번째 주소를 기준으로 정렬했어요.";
+  }
+
+  function drawMap(){
+    if(!kakaoReady || !stops.length) return;
+    var el = $("map");
+    if(!map){ el.innerHTML = ""; el.style.display="block";
+      map = new kakao.maps.Map(el, {center:new kakao.maps.LatLng(stops[0].lat, stops[0].lng), level:6}); }
+    overlays.forEach(function(o){o.setMap(null)}); overlays = [];
+    var bounds = new kakao.maps.LatLngBounds();
+    stops.forEach(function(s, i){
+      var pos = new kakao.maps.LatLng(s.lat, s.lng);
+      var div = document.createElement("div"); div.className = "pin" + (s.done?" done":""); div.textContent = i+1;
+      var o = new kakao.maps.CustomOverlay({position:pos, content:div, yAnchor:0.5}); o.setMap(map); overlays.push(o);
+      bounds.extend(pos);
+    });
+    if(me){
+      var m = document.createElement("div"); m.className="pin me"; m.textContent="나";
+      var mo = new kakao.maps.CustomOverlay({position:new kakao.maps.LatLng(me.lat, me.lng), content:m, yAnchor:0.5});
+      mo.setMap(map); overlays.push(mo); bounds.extend(new kakao.maps.LatLng(me.lat, me.lng));
+    }
+    map.setBounds(bounds);
+  }
+
+  function render(){
+    var ol = $("list"); ol.innerHTML = "";
+    var prev = me;
+    stops.forEach(function(s, i){
+      if(hideDone && s.done) return;
+      var li = document.createElement("li"); li.className = "stop" + (s.done?" done":"");
+      var n = document.createElement("div"); n.className="num"; n.textContent = i+1;
+      var body = document.createElement("div");
+      var a = document.createElement("div"); a.className="addr"; a.textContent = s.addr;
+      var d = document.createElement("div"); d.className="dist";
+      if(prev && !s.done){ d.textContent = (i===0||stops[i-1].done ? "내 위치에서 " : "앞 집에서 ") + fmt(dist(prev, s)); }
+      var acts = document.createElement("div"); acts.className="acts";
+      var go = document.createElement("a"); go.className="go"; go.textContent="길안내";
+      go.href = "https://map.kakao.com/link/to/" + encodeURIComponent(s.addr) + "," + s.lat + "," + s.lng;
+      go.target = "_blank"; go.rel = "noopener";
+      var dn = document.createElement("button"); dn.textContent = s.done ? "완료 취소" : "배송 완료";
+      dn.onclick = function(){ s.done = !s.done; persist(); render(); drawMap(); };
+      var up = document.createElement("button"); up.textContent = "위로"; up.setAttribute("aria-label","순서 위로");
+      up.onclick = function(){ if(i>0){ var t=stops[i-1]; stops[i-1]=stops[i]; stops[i]=t; persist(); render(); drawMap(); } };
+      var dw = document.createElement("button"); dw.textContent = "아래로"; dw.setAttribute("aria-label","순서 아래로");
+      dw.onclick = function(){ if(i<stops.length-1){ var t=stops[i+1]; stops[i+1]=stops[i]; stops[i]=t; persist(); render(); drawMap(); } };
+      var rm = document.createElement("button"); rm.textContent = "삭제";
+      rm.onclick = function(){ stops.splice(i,1); persist(); render(); drawMap(); };
+      acts.appendChild(go); acts.appendChild(dn); acts.appendChild(up); acts.appendChild(dw); acts.appendChild(rm);
+      body.appendChild(a); body.appendChild(d); body.appendChild(acts);
+      li.appendChild(n); li.appendChild(body); ol.appendChild(li);
+      if(!s.done) prev = s;
+    });
+    if(!stops.length) ol.innerHTML = '<li class="hint">아직 주소가 없어요. 위에 주소를 붙여넣고 [지도에 띄우기]를 누르세요.</li>';
+
+    var f = $("fails"); f.innerHTML = "";
+    if(fails.length){
+      var t = document.createElement("p"); t.className="err"; t.style.fontWeight="700";
+      t.textContent = "찾지 못한 주소 " + fails.length + "개 — 고쳐서 다시 찾아보세요";
+      f.appendChild(t);
+      fails.forEach(function(addr, idx){
+        var box = document.createElement("div"); box.className="fail";
+        var inp = document.createElement("input"); inp.type="text"; inp.value = addr; inp.setAttribute("aria-label","주소 수정");
+        var row = document.createElement("div"); row.className="row";
+        var retry = document.createElement("button"); retry.className="main"; retry.textContent="다시 찾기";
+        retry.onclick = function(){ retryFail(idx, inp.value.trim()); };
+        var del = document.createElement("button"); del.textContent="삭제";
+        del.onclick = function(){ fails.splice(idx,1); persist(); render(); };
+        row.appendChild(retry); row.appendChild(del);
+        box.appendChild(inp); box.appendChild(row); f.appendChild(box);
+      });
+    }
+  }
+
+  function retryFail(idx, addr){
+    if(!addr) return;
+    setStatus("찾는 중...");
+    loadKakao().then(function(){ return geocode(addr); }).then(function(r){
+      if(r){ fails.splice(idx,1); stops.push(r); sortStops(); setStatus("찾았어요."); }
+      else { fails[idx] = addr; setStatus("그래도 못 찾았어요. 도로명이나 지번을 더 정확히 적어보세요.", true); }
+      persist(); render(); drawMap();
+    }).catch(function(e){ setStatus(e.message, true); });
+  }
+
+  $("saveKey").onclick = function(){
+    appKey = $("key").value.trim(); save("kakaoKey", appKey);
+    setStatus(appKey ? "키를 저장했어요." : "키가 비어 있어요.", !appKey);
+  };
+
+  $("run").onclick = function(){
+    var lines = $("addrs").value.split("\n").map(function(s){return s.trim()}).filter(Boolean);
+    if(!lines.length){ setStatus("주소를 먼저 붙여넣어 주세요.", true); return; }
+    setStatus("지도를 불러오는 중...");
+    loadKakao().then(function(){
+      setStatus("내 위치와 주소를 찾는 중... (" + lines.length + "개)");
+      return Promise.all([getMe(), Promise.all(lines.map(geocode))]);
+    }).then(function(res){
+      var found = res[1].filter(Boolean);
+      var bad = []; res[1].forEach(function(r, i){ if(!r) bad.push(lines[i]); });
+      stops = stops.concat(found);
+      fails = fails.concat(bad);
+      sortStops(); persist(); render(); drawMap();
+      $("addrs").value = "";
+      setStatus(found.length + "곳을 찾았어요." + (bad.length ? " 못 찾은 주소 " + bad.length + "개는 아래에서 고쳐주세요." : ""), bad.length>0 && !found.length);
+    }).catch(function(e){ setStatus(e.message, true); });
+  };
+
+  $("resort").onclick = function(){
+    setStatus("내 위치를 확인하는 중...");
+    getMe().then(function(){
+      sortStops(); persist(); render(); drawMap();
+      setStatus(me ? "내 위치 기준으로 다시 정렬했어요." : "위치를 못 받았어요. 핸드폰 위치 권한을 켜 주세요.", !me);
+    });
+  };
+
+  $("hideDone").onclick = function(){
+    hideDone = !hideDone; this.textContent = "완료 숨기기: " + (hideDone ? "켜짐" : "꺼짐"); render();
+  };
+
+  $("clear").onclick = function(){
+    if(!confirm("저장된 주소를 전부 지울까요?")) return;
+    stops = []; fails = []; persist(); render(); drawMap(); setStatus("지웠어요.");
+  };
+
+  render();
+  if(stops.length && appKey){
+    loadKakao().then(function(){ return getMe(); }).then(function(){ drawMap(); render(); }).catch(function(){});
+  }
+})();
+</script>
+</body>
+</html>
