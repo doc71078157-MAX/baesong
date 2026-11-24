@@ -260,6 +260,19 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
     if(pts.length > 1){
       var pl = new kakao.maps.Polyline({path:pts, strokeWeight:4, strokeColor:"#0e6b5c", strokeOpacity:0.8});
       pl.setMap(map); overlays.push(pl);
+      // 직선 대신 실제 도로 선으로 바꿔 그려요 (실패하면 직선 그대로)
+      var myTok = (window.__roadTok = (window.__roadTok || 0) + 1);
+      var cs = pts.map(function(q){ return q.getLng() + "," + q.getLat(); }).join(";");
+      if(pts.length <= 80){
+        fetch("https://router.project-osrm.org/route/v1/driving/" + cs + "?overview=full&geometries=geojson")
+          .then(function(r){ return r.json(); })
+          .then(function(d){
+            if(myTok !== window.__roadTok || !d || !d.routes || !d.routes[0]) return;
+            var path = d.routes[0].geometry.coordinates.map(function(c){ return new kakao.maps.LatLng(c[1], c[0]); });
+            var road = new kakao.maps.Polyline({path:path, strokeWeight:5, strokeColor:"#0e6b5c", strokeOpacity:0.9});
+            pl.setMap(null); road.setMap(map); overlays.push(road);
+          }).catch(function(){});
+      }
     }
     if(me){
       var m = document.createElement("div"); m.className="pin me"; m.textContent="나";
@@ -448,4 +461,3 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
 </script>
 </body>
 </html>
-
