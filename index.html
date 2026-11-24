@@ -461,17 +461,30 @@ details summary{font-weight:700;cursor:pointer;min-height:44px;display:flex;alig
     btn.onclick = function(){
       if(!SR){ st.textContent = "이 브라우저는 음성 입력을 지원하지 않아요. 크롬으로 열어 주세요."; return; }
       if(want){ want = false; try{ rec.stop(); }catch(e){} setBtn(false); st.textContent = "멈췄어요. 아래 칸을 확인하고 [지도에 띄우기]를 누르세요."; return; }
-      rec = new SR(); rec.lang = "ko-KR"; rec.continuous = true; rec.interimResults = false;
-      rec.onresult = function(ev){ for(var i = ev.resultIndex; i < ev.results.length; i++){ if(ev.results[i].isFinal) addLine(ev.results[i][0].transcript); } };
-      rec.onerror = function(ev){
-        if(ev.error === "not-allowed" || ev.error === "service-not-allowed"){ want = false; setBtn(false); st.textContent = "마이크를 허용하지 않으셨어요. 주소창 왼쪽 자물쇠를 눌러 [마이크]를 허용으로 바꾸고 다시 눌러 주세요."; }
-        else if(ev.error === "no-speech"){ st.textContent = "말소리가 안 들려요. 계속 듣고 있어요…"; }
-        else if(ev.error !== "aborted"){ st.textContent = "음성 입력 오류(" + ev.error + "). 다시 눌러 주세요."; }
-      };
-      rec.onend = function(){ if(want){ try{ rec.start(); }catch(e){ want = false; setBtn(false); } } else setBtn(false); };
-      try{ want = true; rec.start(); setBtn(true); st.textContent = "듣는 중… 주소 하나를 말하고 잠깐 쉬세요."; }
-      catch(e){ want = false; setBtn(false); st.textContent = "음성 입력을 시작하지 못했어요. 다시 눌러 주세요."; }
+      want = true; setBtn(true); startRec();
     };
+    function startRec(){
+      rec = new SR(); rec.lang = "ko-KR"; rec.continuous = false; rec.interimResults = true; rec.maxAlternatives = 1;
+      rec.onaudiostart = function(){ st.textContent = "① 마이크가 열렸어요. 주소를 말해 주세요."; };
+      rec.onspeechstart = function(){ st.textContent = "② 소리가 들려요. 말을 계속하세요…"; };
+      rec.onresult = function(ev){
+        var interim = "";
+        for(var i = ev.resultIndex; i < ev.results.length; i++){
+          var t = ev.results[i][0].transcript;
+          if(ev.results[i].isFinal) addLine(t); else interim += t;
+        }
+        if(interim) st.textContent = "③ 듣는 중: " + interim;
+      };
+      rec.onerror = function(ev){
+        if(ev.error === "not-allowed" || ev.error === "service-not-allowed"){ want = false; setBtn(false); st.textContent = "마이크를 쓸 수 없어요(" + ev.error + "). 주소창 왼쪽 아이콘 → 권한 → 마이크를 허용으로 바꾸거나, 크롬 대신 다른 브라우저로 열어 보세요."; }
+        else if(ev.error === "no-speech"){ st.textContent = "말소리가 안 들렸어요. 다시 듣는 중이에요… 마이크 가까이에서 말해 주세요."; }
+        else if(ev.error === "network"){ want = false; setBtn(false); st.textContent = "인터넷 연결이 불안정해서 음성을 글자로 바꾸지 못했어요(network)."; }
+        else if(ev.error !== "aborted"){ st.textContent = "음성 입력 오류(" + ev.error + ")."; }
+      };
+      rec.onend = function(){ if(want){ setTimeout(function(){ if(want){ try{ startRec(); }catch(e){ want = false; setBtn(false); st.textContent = "음성 입력을 다시 시작하지 못했어요. 버튼을 눌러 주세요."; } } }, 250); } else setBtn(false); };
+      try{ rec.start(); st.textContent = "마이크를 여는 중…"; }
+      catch(e){ want = false; setBtn(false); st.textContent = "음성 입력을 시작하지 못했어요(" + (e && e.name) + "). 다시 눌러 주세요."; }
+    }
   })();
 
   (function importHash(){
